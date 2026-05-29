@@ -20,16 +20,35 @@ export interface ThrowOption {
   catch_probability: number;
   yards_gained: number;
   expected_value: number;
+  throw_type: "backhand" | "flick" | "hammer" | "scoober";
+  outcome:
+    | "catch"
+    | "block"
+    | "incomplete"
+    | "out_of_bounds"
+    | "interception"
+    | "callahan";
+  flight_path: [number, number][];
 }
+
+export type Scheme = "man" | "zone" | "cup";
 
 export interface SimulateResponse {
   handler_id: string;
   chosen: ThrowOption | null;
-  outcome: "catch" | "block" | "incomplete" | "no_throw";
+  outcome:
+    | "catch"
+    | "block"
+    | "incomplete"
+    | "no_throw"
+    | "out_of_bounds"
+    | "interception"
+    | "callahan";
   outcome_detail: string;
   options: ThrowOption[];
   receiver_predicted_positions: Record<string, [number, number]>;
   defender_predicted_positions: Record<string, [number, number]>;
+  scheme: Scheme;
 }
 
 export const FIELD_LENGTH = 100;

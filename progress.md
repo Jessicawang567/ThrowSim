@@ -54,3 +54,10 @@ _Started: 2026-05-29 09:16_
 **Eval summary:** Cleanly built and well-styled v0-grade Vite+React+TS+Tailwind shell with a working FastAPI backend and end-to-end wiring for a 2D top-down catch-prediction toy. However the implementation is a constant-speed lead-pass calculator: none of the paper-derived physics (lift/drag/AoA/spin/Magnus/gyroscopic/wind) and almost none of the ultimate-domain rules (throw types, stacks, schemes, force/stall, jum
 
 ---
+
+## Cycle 2 (swe-eval) — 2026-05-29 09:36
+**Verdict:** strong-disapprove
+
+**Eval summary:** Polished Tailwind+React frontend wired to a working FastAPI backend that runs a 2D top-down lead-pass simulator with 3 defensive schemes and 6 outcome types. However, the domain requirements span two papers (EPV throw valuation + 6DoF rigid-body frisbee flight dynamics) and the prototype implements neither rigorously: no z-axis at all, no lift coefficient, no AoA evolution from pitching moment, no
+
+---

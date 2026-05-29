@@ -3,7 +3,7 @@ import { FieldCanvas } from "./components/FieldCanvas";
 import { PlayerInspector } from "./components/PlayerInspector";
 import { ResultPanel } from "./components/ResultPanel";
 import { defaultPlayers } from "./presets";
-import type { Player, SimulateResponse } from "./types";
+import type { Player, Scheme, SimulateResponse } from "./types";
 import { simulate } from "./api";
 import { Play, RotateCcw, Bot, MousePointerClick } from "lucide-react";
 
@@ -11,6 +11,7 @@ export default function App() {
   const [players, setPlayers] = useState<Player[]>(defaultPlayers());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<"user" | "ai">("ai");
+  const [scheme, setScheme] = useState<Scheme>("man");
   const [targetId, setTargetId] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [result, setResult] = useState<SimulateResponse | null>(null);
@@ -47,7 +48,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const r = await simulate(players, mode, targetId);
+      const r = await simulate(players, mode, targetId, scheme);
       setResult(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -74,6 +75,22 @@ export default function App() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span className="uppercase tracking-wider">D scheme</span>
+              <div className="flex rounded-md ring-1 ring-slate-700 overflow-hidden text-sm">
+                {(["man", "zone", "cup"] as Scheme[]).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setScheme(s)}
+                    className={`px-2.5 py-1.5 capitalize ${
+                      scheme === s ? "bg-slate-700 text-white" : "text-slate-400"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex rounded-md ring-1 ring-slate-700 overflow-hidden text-sm">
               <button
                 onClick={() => setMode("ai")}

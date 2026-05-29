@@ -14,7 +14,11 @@ const icon = (o: SimulateResponse["outcome"]) => {
     case "catch":
       return <CheckCircle2 className="text-emerald-400" size={20} />;
     case "block":
+    case "interception":
       return <XCircle className="text-rose-400" size={20} />;
+    case "callahan":
+      return <XCircle className="text-fuchsia-400" size={20} />;
+    case "out_of_bounds":
     case "incomplete":
       return <AlertTriangle className="text-amber-400" size={20} />;
     default:
