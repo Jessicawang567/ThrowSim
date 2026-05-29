@@ -38,3 +38,19 @@ _Started: 2026-05-29 09:16_
   - The system should switch between flight and contact solvers based on collision detection
 
 ---
+
+## Cycle 1 (research-swe-eval) — 2026-05-29 09:26
+**Verdict:** strong-disapprove
+**New checklist items (14):**
+- [yes/no] Disc trajectory is computed from lift and drag coefficients that vary with angle of attack (not treated as a ballistic projectile), with forces scaling with v² and air density.
+- [yes/no] Flight model represents spin-induced gyroscopic stability so release roll/pitch persist and influence curvature instead of the disc tumbling.
+- [yes/no] Angle of attack evolves over the flight from the disc's pitching moment (center of pressure offset from CG), producing realistic late-flight fade or hold.
+- [yes/no] A flat release with no lateral velocity still curves predictably left or right depending on spin direction, modeling the Robins-Magnus lateral force.
+- [yes/no] Release speeds, spin rates, and angles of attack used by the simulator are grounded in measured human throw data rather than invented constants, and reproduce published range/hang-time.
+- [yes/no] Engine supports at least backhand, forehand/flick, and hammer releases, including inside-out and outside-in curvature variants.
+- [yes/no] Player movement uses empirically grounded sprint, acceleration, and cutting parameters with distinct acceleration and top-speed phases, not constant velocity.
+- [yes/no] Receivers and defenders pursue the disc's predicted future arrival point rather than its current position, and catch resolution depends on who arrives first while the disc is still catchable.
+
+**Eval summary:** Cleanly built and well-styled v0-grade Vite+React+TS+Tailwind shell with a working FastAPI backend and end-to-end wiring for a 2D top-down catch-prediction toy. However the implementation is a constant-speed lead-pass calculator: none of the paper-derived physics (lift/drag/AoA/spin/Magnus/gyroscopic/wind) and almost none of the ultimate-domain rules (throw types, stacks, schemes, force/stall, jum
+
+---

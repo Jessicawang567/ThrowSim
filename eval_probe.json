@@ -1,0 +1,8 @@
+{
+  "url": "http://localhost:5173/",
+  "channel": "msedge",
+  "browser_unavailable": true,
+  "browser_launch_error": "Error: BrowserType.launch: Chromium distribution 'msedge' is not found at /opt/microsoft/msedge/msedge\nRun \"playwright install msedge\"",
+  "ok": false,
+  "hint": "Browser binary not available. If you passed --channel, make sure that browser is installed system-wide (google-chrome-stable / microsoft-edge). Otherwise run `playwright install chromium`. On bleeding-edge Linux distros where Playwright's bundled chromium isn't yet supported, install Google Chrome via the official .deb and re-run with `--channel chrome`."
+}
