@@ -84,3 +84,19 @@ _Started: 2026-05-29 09:16_
 **Eval summary:** Vite+React+TS+Tailwind frontend with a clean dark dashboard, working end-to-end POST /api/simulate flow, and a notably ambitious aerodynamics model (α-dependent CL, induced-drag polar, relative-wind frame, Magnus, gyro precession, multiple release types incl. IO/OI). However, several physics fundamentals are missing or incorrect (1/spin precession sign wrong, no spin→lift coupling, no destabilizin
 
 ---
+
+## Cycle 5 (research-swe-eval) — 2026-05-29 10:10
+**Verdict:** approve
+**New checklist items (10):**
+- [yes/no] Disc roll/pitch precession rate is inversely proportional to spin angular velocity (ωp = τ/(Is·ωs)), so higher spin yields straighter, more stable flight rather than greater precession.
+- [yes/no] Simulated disc trajectories qualitatively match published frisbee aerodynamic models (Hummel/Potts) where pitch/roll response to aerodynamic torque decreases with increasing spin rate.
+- [yes/no] Receivers accelerate from rest toward a top speed (e.g., v(t)=min(a·t, vmax) or v(t)=vmax(1−e^(−t/τ))) rather than translating at constant velocity from t=0.
+- [yes/no] Player top-speed parameter is bounded by elite human sprint data (≈9–12 m/s) and acceleration by realistic peak values (≈3–4 m/s² average over 0–30 m).
+- [yes/no] When a receiver's cut vector changes direction, the simulator imposes a deceleration/reacceleration cost (time penalty proportional to angle change) instead of instantaneous velocity reversal.
+- [yes/no] Simulator accepts a `force` input (flick/backhand/none) and biases the thrower's available/selected throws away from the forced side, reflecting standard ultimate marking strategy.
+- [yes/no] The simulate API accepts an incoming `stall_count` (0–10), advances it during possession, returns the updated value, and forces a turnover/dump decision as the count approaches 10.
+- [yes/no] Frontend exposes both `force` (flick/backhand/none) and `stall_count` controls alongside scheme/mode, posted values reach the backend, and returned stall_count is displayed.
+
+**Eval summary:** Solid full-stack prototype with real React+TS+Tailwind frontend (sticky header, segmented controls, lucide icons, modular components) and a substantive FastAPI backend implementing a genuine 3-DOF aerodynamic flight model with α-dependent lift, induced drag, Magnus, pitching-moment-driven pitch evolution, and 1/spin gyroscopic precession. Builds, starts, and API smoke test returns rich physics-dri
+
+---

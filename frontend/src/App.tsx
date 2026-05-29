@@ -3,7 +3,7 @@ import { FieldCanvas } from "./components/FieldCanvas";
 import { PlayerInspector } from "./components/PlayerInspector";
 import { ResultPanel } from "./components/ResultPanel";
 import { defaultPlayers } from "./presets";
-import type { Player, Scheme, SimulateResponse, Wind } from "./types";
+import type { Force, Player, Scheme, SimulateResponse, Wind } from "./types";
 import { simulate } from "./api";
 import { Play, RotateCcw, Bot, MousePointerClick } from "lucide-react";
 
@@ -18,6 +18,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wind, setWind] = useState<Wind>({ vx: 0, vy: 0, vz: 0 });
+  const [force, setForce] = useState<Force>("none");
+  const [stallCount, setStallCount] = useState<number>(0);
 
   const selected = players.find((p) => p.id === selectedId) ?? null;
 
@@ -43,14 +45,16 @@ export default function App() {
     setTargetId(null);
     setResult(null);
     setError(null);
+    setStallCount(0);
   };
 
   const onSimulate = async () => {
     setLoading(true);
     setError(null);
     try {
-      const r = await simulate(players, mode, targetId, scheme, wind);
+      const r = await simulate(players, mode, targetId, scheme, wind, force, stallCount);
       setResult(r);
+      setStallCount(r.stall_count ?? 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setResult(null);
@@ -91,6 +95,34 @@ export default function App() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span className="uppercase tracking-wider">Force</span>
+              <div className="flex rounded-md ring-1 ring-slate-700 overflow-hidden text-sm">
+                {(["none", "flick", "backhand"] as Force[]).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setForce(f)}
+                    className={`px-2.5 py-1.5 capitalize ${
+                      force === f ? "bg-slate-700 text-white" : "text-slate-400"
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span className="uppercase tracking-wider">Stall</span>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={1}
+                value={stallCount}
+                onChange={(e) => setStallCount(parseFloat(e.target.value) || 0)}
+                className="w-14 bg-slate-900 text-slate-100 ring-1 ring-slate-700 rounded px-2 py-1 text-sm tabular-nums"
+              />
             </div>
             <div className="flex rounded-md ring-1 ring-slate-700 overflow-hidden text-sm">
               <button

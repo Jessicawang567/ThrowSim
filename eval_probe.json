@@ -1,5 +1,5 @@
 {
-  "url": "http://localhost:5173/",
+  "url": "http://localhost:5177/",
   "channel": "msedge",
   "browser_unavailable": true,
   "browser_launch_error": "Error: BrowserType.launch: Chromium distribution 'msedge' is not found at /opt/microsoft/msedge/msedge\nRun \"playwright install msedge\"",

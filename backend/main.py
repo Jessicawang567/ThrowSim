@@ -100,6 +100,39 @@ CL_POST_STALL_DECAY = 0.04   # 1/deg, linear drop past stall
 ALPHA_TRIM_DEG      = 5.0    # trim AoA (zero pitching moment)
 CM_ALPHA_PER_DEG    = -3.0e-6  # restoring (very small; gyro-stiffened disc)
 GYRO_GAIN           = 0.0006   # rad/(s*deg) bank-precession coupling
+SPIN_EPS            = 0.05     # avoid /0 when spin magnitude is tiny
+
+# Receiver acceleration model: world-class sprinters reach ~7.5 m/s top speed
+# in ~1.5 s from rest, giving ~5 m/s^2 effective accel. A direction-change cut
+# costs a small replant time (~0.25 s) per radian of heading change.
+DEFAULT_ACCEL = 5.0  # m/s^2
+DIR_CHANGE_PENALTY_S_PER_RAD = 0.25 / math.pi * math.pi  # = 0.25 s per rad
+
+
+def receiver_run_time(distance: float, top_speed: float, accel: float,
+                      dir_change_rad: float = 0.0) -> float:
+    """Time to cover `distance` with accel-then-top-speed kinematics, plus a
+    direction-change replant penalty proportional to heading change."""
+    if distance <= 0.0:
+        return DIR_CHANGE_PENALTY_S_PER_RAD * abs(dir_change_rad)
+    t_to_top = top_speed / max(accel, 1e-6)
+    d_to_top = 0.5 * accel * t_to_top * t_to_top
+    if distance <= d_to_top:
+        t = math.sqrt(2.0 * distance / accel)
+    else:
+        t = t_to_top + (distance - d_to_top) / top_speed
+    return t + DIR_CHANGE_PENALTY_S_PER_RAD * abs(dir_change_rad)
+
+
+def receiver_position_at(px: float, py: float, dirx: float, diry: float,
+                         t: float, top_speed: float, accel: float) -> Tuple[float, float]:
+    """Position at time t given unit direction (dirx, diry), v(t)=min(a*t, vmax)."""
+    t_to_top = top_speed / max(accel, 1e-6)
+    if t <= t_to_top:
+        d = 0.5 * accel * t * t
+    else:
+        d = 0.5 * accel * t_to_top * t_to_top + top_speed * (t - t_to_top)
+    return px + dirx * d, py + diry * d
 
 
 def cl_of_alpha(alpha_deg: float) -> float:
@@ -270,7 +303,10 @@ def integrate_flight_3d(
         theta += (M_pitch / IYY) * dt
         # Gyroscopic precession couples pitch moment into bank evolution;
         # this is what produces the late-flight lateral fade naturally.
-        phi += spin * GYRO_GAIN * (alpha_deg - ALPHA_TRIM_DEG) * dt
+        # Gyroscopic precession rate scales as 1/spin (higher spin -> straighter).
+        # Sign comes from spin direction; magnitude divides by |spin|.
+        spin_mag = max(abs(spin), SPIN_EPS)
+        phi += math.copysign(1.0, spin) * GYRO_GAIN * (alpha_deg - ALPHA_TRIM_DEG) / spin_mag * dt
 
         t += dt
         travelled = (x - handler_x) * hx + (y - handler_y) * hy
@@ -306,6 +342,9 @@ class Player(BaseModel):
     # Vertical reach height in meters: standing reach + max jump (3D contest).
     # World-class ultimate players ~2.4 m; user-adjustable per player.
     reach_height: float = Field(default=DEFAULT_REACH_HEIGHT, ge=1.5, le=3.5)
+    # Sprint acceleration (m/s^2) to top speed — used for accel-then-top-speed
+    # receiver kinematics; world-class default ~5 m/s^2.
+    accel: float = Field(default=DEFAULT_ACCEL, ge=1.0, le=12.0)
 
 
 class WindVec(BaseModel):
@@ -324,6 +363,12 @@ class SimulateRequest(BaseModel):
     # Ambient wind vector in m/s. vx along field length (positive = tailwind
     # toward attacking endzone), vy across field width, vz vertical.
     wind: WindVec = Field(default_factory=WindVec)
+    # Marker force: which side the mark is taking away. 'flick' forces the
+    # thrower to throw backhand (right-handed thrower); 'backhand' forces flick.
+    force: Literal["flick", "backhand", "none"] = "none"
+    # Stall count carried across simulations. Advances by ~stall_advance each
+    # play; resets to 0 on a completion in the response.
+    stall_count: float = Field(default=0.0, ge=0.0, le=10.0)
 
 
 class ThrowOption(BaseModel):
@@ -364,6 +409,8 @@ class SimulateResponse(BaseModel):
     receiver_predicted_positions: dict  # id -> (x, y) at chosen flight time
     defender_predicted_positions: dict
     scheme: Literal["man", "zone", "cup"] = "man"
+    stall_count: float = 0.0
+    force: Literal["flick", "backhand", "none"] = "none"
 
 
 # ---------------------------------------------------------------------------
@@ -532,10 +579,11 @@ def find_catch_point(
     actually arrives at the lead point.
     Returns (catch_x, catch_y, catch_z, flight_time, samples_3d)."""
     if receiver.direction is None:
-        vx, vy = 0.0, 0.0
+        dirx, diry = 0.0, 0.0
     else:
-        vx = math.cos(receiver.direction) * player_speed
-        vy = math.sin(receiver.direction) * player_speed
+        dirx = math.cos(receiver.direction)
+        diry = math.sin(receiver.direction)
+    accel = getattr(receiver, "accel", DEFAULT_ACCEL)
 
     rx, ry = receiver.x, receiver.y
     # initial guess: aim at receiver, no lead
@@ -544,8 +592,7 @@ def find_catch_point(
         handler.x, handler.y, aim_x, aim_y, throw, wind=wind
     )
     for _ in range(8):
-        lead_x = rx + vx * t
-        lead_y = ry + vy * t
+        lead_x, lead_y = receiver_position_at(rx, ry, dirx, diry, t, player_speed, accel)
         lead_x, lead_y = clamp_to_field(lead_x, lead_y)
         # correct aim by the curvature offset (lead - end)
         aim_x += lead_x - end_x
@@ -621,7 +668,15 @@ def evaluate_throw(
     dt_sample = 0.02
 
     receiver_run_dist = dist(receiver.x, receiver.y, cx, cy)
-    receiver_reach_time = receiver_run_dist / player_speed
+    # Direction-change penalty: angle between current cut and vector to catch.
+    dir_change = 0.0
+    if receiver.direction is not None and receiver_run_dist > 1e-3:
+        cur = receiver.direction
+        new = math.atan2(cy - receiver.y, cx - receiver.x)
+        diff = (new - cur + math.pi) % (2 * math.pi) - math.pi
+        dir_change = abs(diff)
+    rx_accel = getattr(receiver, "accel", DEFAULT_ACCEL)
+    receiver_reach_time = receiver_run_time(receiver_run_dist, player_speed, rx_accel, dir_change)
     receiver_arrival = max(flight_time, receiver_reach_time)
 
     # 3D contest: if disc is above receiver's reach (even laying out), they
@@ -631,7 +686,8 @@ def evaluate_throw(
 
     if defender is not None:
         d_dist = dist(defender.x, defender.y, cx, cy)
-        defender_arrival = d_dist / player_speed + REACTION_DELAY
+        d_accel = getattr(defender, "accel", DEFAULT_ACCEL)
+        defender_arrival = receiver_run_time(d_dist, player_speed, d_accel) + REACTION_DELAY
         def_reach = getattr(defender, "reach_height", DEFAULT_REACH_HEIGHT)
         defender_can_reach_height = cz <= def_reach + VERTICAL_TOLERANCE
     else:
@@ -773,12 +829,37 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
     off_lookup = {p.id: p for p in players if p.team == "offense"}
 
     wind_t = (req.wind.vx, req.wind.vy, req.wind.vz)
+
+    # Marker force: bias throw selection away from forced side. A 'flick' force
+    # means the mark blocks the flick side, so flick-family throws are heavily
+    # discouraged; mirror for 'backhand'.
+    flick_family = {ThrowType.flick, ThrowType.flick_io, ThrowType.flick_oi, ThrowType.scoober}
+    bh_family = {ThrowType.backhand, ThrowType.backhand_io, ThrowType.backhand_oi, ThrowType.hammer}
+
+    def apply_force(t: ThrowType) -> ThrowType:
+        if req.force == "flick" and t in flick_family:
+            # Swap to closest backhand-family equivalent
+            return {
+                ThrowType.flick: ThrowType.backhand,
+                ThrowType.flick_io: ThrowType.backhand_io,
+                ThrowType.flick_oi: ThrowType.backhand_oi,
+                ThrowType.scoober: ThrowType.hammer,
+            }[t]
+        if req.force == "backhand" and t in bh_family:
+            return {
+                ThrowType.backhand: ThrowType.flick,
+                ThrowType.backhand_io: ThrowType.flick_io,
+                ThrowType.backhand_oi: ThrowType.flick_oi,
+                ThrowType.hammer: ThrowType.scoober,
+            }[t]
+        return t
+
     options: List[ThrowOption] = []
     for o in players:
         if o.team != "offense" or o.id == handler.id:
             continue
         defender = def_lookup.get(matchups.get(o.id, ""), None)
-        throw = best_throw_type(handler, o.x, o.y)
+        throw = apply_force(best_throw_type(handler, o.x, o.y))
         opt = evaluate_throw(
             handler, o, defender, all_defenders, req.player_speed, throw, wind=wind_t
         )
@@ -896,6 +977,8 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
         receiver_predicted_positions=rec_pos,
         defender_predicted_positions=def_pos,
         scheme=req.scheme,
+        stall_count=(0.0 if outcome == "catch" else min(10.0, req.stall_count + 1.0)),
+        force=req.force,
     )
 
 

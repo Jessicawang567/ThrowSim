@@ -1,17 +1,16 @@
 INFO:     Will watch for changes in these directories: ['/home/v-zicwang/projects/prototyper/playground/frisbee-stack-sim-0529-09']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [11528] using WatchFiles
-INFO:     Started server process [11530]
+INFO:     Started reloader process [11874] using WatchFiles
+INFO:     Started server process [11906]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     127.0.0.1:49566 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:53648 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50570 - "GET /health HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50582 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60692 - "GET /api/health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60702 - "POST /api/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52286 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52526 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52532 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40102 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40116 - "POST /api/simulate HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [11530]
-INFO:     Stopping reloader process [11528]
+INFO:     Finished server process [11906]
+INFO:     Stopping reloader process [11874]

@@ -32,6 +32,7 @@ export interface ThrowOption {
 }
 
 export type Scheme = "man" | "zone" | "cup";
+export type Force = "flick" | "backhand" | "none";
 
 export interface Wind {
   vx: number;
@@ -55,6 +56,8 @@ export interface SimulateResponse {
   receiver_predicted_positions: Record<string, [number, number]>;
   defender_predicted_positions: Record<string, [number, number]>;
   scheme: Scheme;
+  stall_count: number;
+  force: Force;
 }
 
 export const FIELD_LENGTH = 100;

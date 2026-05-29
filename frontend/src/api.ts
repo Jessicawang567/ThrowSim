@@ -1,4 +1,4 @@
-import type { Player, Scheme, SimulateResponse, Wind } from "./types";
+import type { Force, Player, Scheme, SimulateResponse, Wind } from "./types";
 
 const BASE =
   ((import.meta as unknown as { env?: { VITE_API_BASE?: string } }).env
@@ -10,11 +10,21 @@ export async function simulate(
   targetId: string | null,
   scheme: Scheme = "man",
   wind: Wind = { vx: 0, vy: 0, vz: 0 },
+  force: Force = "none",
+  stallCount: number = 0,
 ): Promise<SimulateResponse> {
   const res = await fetch(`${BASE}/api/simulate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ players, mode, target_id: targetId, scheme, wind }),
+    body: JSON.stringify({
+      players,
+      mode,
+      target_id: targetId,
+      scheme,
+      wind,
+      force,
+      stall_count: stallCount,
+    }),
   });
   if (!res.ok) {
     const text = await res.text();
