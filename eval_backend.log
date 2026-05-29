@@ -1,15 +1,25 @@
 INFO:     Will watch for changes in these directories: ['/home/v-zicwang/projects/prototyper/playground/frisbee-stack-sim-0529-09']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [10860] using WatchFiles
-INFO:     Started server process [10895]
+INFO:     Started reloader process [11157] using WatchFiles
+INFO:     Started server process [11191]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     127.0.0.1:36996 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50164 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:54990 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52530 - "POST /api/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36574 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36576 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36582 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36592 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36596 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36610 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36618 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36632 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36636 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50648 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39426 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39430 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39446 - "GET /api/field HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53074 - "POST /api/simulate HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [10895]
-INFO:     Stopping reloader process [10860]
+INFO:     Finished server process [11191]
+INFO:     Stopping reloader process [11157]

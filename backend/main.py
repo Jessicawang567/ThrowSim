@@ -52,167 +52,218 @@ REACTION_DELAY = 0.15  # seconds defender reaction handicap (world-class but hum
 
 
 # ---------------------------------------------------------------------------
-# Throw aerodynamics
+# Throw aerodynamics — 3D flight model
 # ---------------------------------------------------------------------------
-# Per-throw-type release / aero parameters. Magnitudes drawn from the published
-# disc-golf / ultimate aero ranges (e.g. Hummel 2003, "Frisbee Flight Simulation
-# and Throw Biomechanics"; Potts & Crowther 2002, "Frisbee(TM) Aerodynamics").
-# Drag uses an effective coefficient k such that  dv/dt = -k * v^2  (units 1/m),
-# obtained from k = 0.5 * rho * Cd * A / m with rho=1.2, m=0.175kg, A~0.0568 m^2
-# and Cd ~ 0.08-0.18 across AoA. Lateral curvature `curve_accel` is a Magnus
-# proxy lumped as a constant sideways acceleration that scales with spin sign;
-# late-fade for backhand/flick is modelled by ramping that acceleration with
-# elapsed flight time (spin axis tilts as the disc slows).
+# Minimal 3-DOF translational state (x, y, z) + (vx, vy, vz), with a scalar
+# pitch state theta evolved from an aerodynamic pitching moment and a bank
+# state phi that carries the inside-out vs outside-in release roll.
+#
+# Forces (Hummel 2003, Potts & Crowther 2002 ranges):
+#   Lift:   L = 0.5 * rho * v^2 * S * CL(alpha)
+#   Drag:   D = drag_k * v^2  (per-throw effective coefficient; CD(alpha)
+#                              implicit via the CL-induced drag polar below)
+#   Gravity: -g on z
+# CL(alpha): linear ramp through zero-lift at alpha ~= -4 deg, slope ~0.04/deg,
+# stall at alpha ~= 25 deg with linear post-stall decay (Hummel Fig. 4).
+# CD(alpha): CD = (1 + k_i*CL^2) * (drag_k/CD0_ref) -- folded into drag_k so
+# the per-throw drag_k still calibrates the cruise drag, and induced drag
+# scales with CL(alpha).
+# Pitching moment: CM(alpha) = CM_ALPHA * (alpha - alpha_trim) with a small
+# CP-CG offset; pitch evolves as dtheta/dt = M(alpha)/Iyy (gyroscopic damping
+# folded into the use of Iyy as a first-order rate coefficient).
+# Bank precession: dphi/dt = spin_sign * GYRO_GAIN * (alpha - alpha_trim) --
+# late fade falls out of the physics rather than a hardcoded t/1.2 ramp.
+
+RHO          = 1.225      # kg/m^3, sea-level air
+DISC_MASS    = 0.175      # kg, 175g Ultimate disc
+DISC_AREA    = 0.0568     # m^2, planform area (d ~ 0.27 m)
+DISC_CHORD   = 0.27       # m, used for pitching moment
+GRAV         = 9.81
+IYY          = 1.0e-3     # kg*m^2, representative pitch inertia
+RELEASE_HEIGHT = 1.5      # m
+
+ALPHA_ZERO_LIFT_DEG = -4.0   # CL=0 here
+ALPHA_STALL_DEG     = 25.0
+CL_SLOPE_PER_DEG    = 0.04
+CL_POST_STALL_DECAY = 0.04   # 1/deg, linear drop past stall
+
+ALPHA_TRIM_DEG      = 5.0    # trim AoA (zero pitching moment)
+CM_ALPHA_PER_DEG    = -3.0e-6  # restoring (very small; gyro-stiffened disc)
+GYRO_GAIN           = 0.0006   # rad/(s*deg) bank-precession coupling
+
+
+def cl_of_alpha(alpha_deg: float) -> float:
+    """Lift coefficient: linear from zero-lift to stall, linear decay after."""
+    if alpha_deg <= ALPHA_STALL_DEG:
+        return CL_SLOPE_PER_DEG * (alpha_deg - ALPHA_ZERO_LIFT_DEG)
+    cl_peak = CL_SLOPE_PER_DEG * (ALPHA_STALL_DEG - ALPHA_ZERO_LIFT_DEG)
+    return max(0.0, cl_peak * (1.0 - CL_POST_STALL_DECAY * (alpha_deg - ALPHA_STALL_DEG)))
+
+
 class ThrowType(str, Enum):
     backhand = "backhand"
     flick = "flick"
     hammer = "hammer"
     scoober = "scoober"
+    backhand_io = "backhand_io"  # inside-out release (negative bank for RHBH)
+    backhand_oi = "backhand_oi"  # outside-in release (positive bank for RHBH)
+    flick_io = "flick_io"
+    flick_oi = "flick_oi"
 
 
-# spin_sign: +1 = RHBH spin (clockwise viewed from above) -> fades LEFT for
-# right-handed thrower; -1 = opposite (flick). Hammer/scoober are inverted
-# overhead throws that curve hard early.
+# spin_sign: +1 = RHBH spin (clockwise viewed from above), -1 = flick spin.
+# bank_deg: release roll angle phi about the velocity axis. Sign convention:
+#   positive bank tilts lift toward the spin's natural fade direction
+#   (OI: curve in same direction as fade -> exaggerated late fade)
+#   negative bank tilts lift opposite spin's fade (IO: hyzer-flip / S-curve)
+# aoa_deg: release pitch angle (initial theta).
 THROW_PARAMS: dict = {
     ThrowType.backhand: {
-        "release_speed": 24.0,   # m/s, elite release
-        "spin_sign":     +1.0,
-        "aoa_deg":        6.0,   # small positive AoA -> moderate lift/drag
-        "drag_k":         0.0055,
-        "curve_accel":    0.45,  # m/s^2 ; ramps with t (late fade)
-        "curve_late":     True,
+        "release_speed": 24.0, "spin_sign": +1.0,
+        "aoa_deg": 6.0, "bank_deg": 0.0, "drag_k": 0.0055,
     },
     ThrowType.flick: {
-        "release_speed": 22.5,
-        "spin_sign":     -1.0,
-        "aoa_deg":        7.0,
-        "drag_k":         0.0065,
-        "curve_accel":    0.55,
-        "curve_late":     True,
+        "release_speed": 22.5, "spin_sign": -1.0,
+        "aoa_deg": 7.0, "bank_deg": 0.0, "drag_k": 0.0065,
     },
     ThrowType.hammer: {
-        "release_speed": 19.5,
-        "spin_sign":     +1.0,   # inverted: curves opposite of backhand
-        "aoa_deg":       12.0,
-        "drag_k":         0.0090,  # higher drag at high AoA (Hummel)
-        "curve_accel":    1.10,
-        "curve_late":     False,   # curves throughout flight
+        "release_speed": 19.5, "spin_sign": +1.0,
+        "aoa_deg": 12.0, "bank_deg": 15.0, "drag_k": 0.0090,
     },
     ThrowType.scoober: {
-        "release_speed": 17.5,
-        "spin_sign":     -1.0,
-        "aoa_deg":       10.0,
-        "drag_k":         0.0085,
-        "curve_accel":    1.00,
-        "curve_late":     False,
+        "release_speed": 17.5, "spin_sign": -1.0,
+        "aoa_deg": 10.0, "bank_deg": 15.0, "drag_k": 0.0085,
+    },
+    ThrowType.backhand_io: {
+        "release_speed": 24.0, "spin_sign": +1.0,
+        "aoa_deg": 6.0, "bank_deg": -8.0, "drag_k": 0.0055,
+    },
+    ThrowType.backhand_oi: {
+        "release_speed": 24.0, "spin_sign": +1.0,
+        "aoa_deg": 6.0, "bank_deg": +8.0, "drag_k": 0.0055,
+    },
+    ThrowType.flick_io: {
+        "release_speed": 22.5, "spin_sign": -1.0,
+        "aoa_deg": 7.0, "bank_deg": -8.0, "drag_k": 0.0065,
+    },
+    ThrowType.flick_oi: {
+        "release_speed": 22.5, "spin_sign": -1.0,
+        "aoa_deg": 7.0, "bank_deg": +8.0, "drag_k": 0.0065,
     },
 }
 
 
-def integrate_flight(
+def integrate_flight_3d(
     handler_x: float,
     handler_y: float,
     aim_x: float,
     aim_y: float,
     throw: ThrowType,
     dt: float = 0.02,
-    max_t: float = 6.0,
+    max_t: float = 8.0,
 ) -> Tuple[float, float, float, List[Tuple[float, float]]]:
-    """Time-stepped 2D flight integrator.
+    """3-DOF translational integrator with pitch/bank evolution.
 
-    Returns (end_x, end_y, flight_time, samples). Integration terminates when
-    the disc reaches the aim distance along its initial heading. Lateral
-    (Magnus-proxy) acceleration is applied perpendicular to the heading and
-    scaled by spin_sign. For backhand/flick the curvature ramps with elapsed
-    time (the late "fade" of an under-stable disc); for hammer/scoober it is
-    constant since the disc is inverted and curves throughout.
+    Returns (end_x, end_y, flight_time, ground_samples). Samples are 2D
+    ground-projected positions (x, y) so downstream OOB / intercept logic is
+    unchanged. Termination: horizontal distance along the initial heading
+    reaches dist0, OR the disc hits the ground (z <= 0), OR max_t expires.
     """
     params = THROW_PARAMS[throw]
-    v = float(params["release_speed"])
-    k = float(params["drag_k"])
-    spin = float(params["spin_sign"])
-    curve = float(params["curve_accel"])
-    late = bool(params["curve_late"])
+    v0       = float(params["release_speed"])
+    spin     = float(params["spin_sign"])
+    drag_k   = float(params["drag_k"])
+    theta    = math.radians(float(params["aoa_deg"]))   # pitch
+    phi      = math.radians(float(params["bank_deg"]))  # bank (release roll)
 
     dx = aim_x - handler_x
     dy = aim_y - handler_y
     dist0 = math.hypot(dx, dy)
     if dist0 < 1e-6:
         return handler_x, handler_y, 0.0, [(handler_x, handler_y)]
-    hx, hy = dx / dist0, dy / dist0          # heading unit vector
-    px, py = -hy, hx                          # left-perpendicular
+    hx, hy = dx / dist0, dy / dist0  # initial horizontal heading
 
-    x, y = handler_x, handler_y
-    t = 0.0
+    # Initial velocity: aim flat in the horizontal plane with the release pitch
+    # already absorbed in theta. (gamma0 = 0  => alpha0 = theta.)
+    x, y, z = handler_x, handler_y, RELEASE_HEIGHT
+    vx = v0 * hx
+    vy = v0 * hy
+    vz = 0.0
+
     samples: List[Tuple[float, float]] = [(x, y)]
+    t = 0.0
     travelled = 0.0
     while t < max_t and travelled < dist0:
-        # v^2 drag along velocity
-        v = max(2.0, v - k * v * v * dt)
-        # decompose: forward speed component (ignore that lateral drift slightly
-        # reduces forward speed at second order -- fine for static prediction)
-        # lateral accel from spin; ramp for backhand/flick late fade
-        ramp = (t / 1.2) if late else 1.0
-        lat_a = spin * curve * min(ramp, 1.5)
-        # update lateral velocity & position via simple Euler
-        # treat forward speed as |v| reduced by lateral component magnitude
-        # (we keep forward heading fixed and accumulate sideways drift)
-        x += hx * v * dt + px * 0.5 * lat_a * dt * dt
-        y += hy * v * dt + py * 0.5 * lat_a * dt * dt
-        # sideways velocity added next step (cumulative drift)
-        # cheap approximation: add to position only (lat velocity grows via 0.5 a t^2)
-        # better: track a separate lateral velocity:
-        # (folded above via 0.5 a dt^2; integrate properly below)
+        v = math.sqrt(vx * vx + vy * vy + vz * vz)
+        v_h = math.sqrt(vx * vx + vy * vy)
+        if v < 1.0:
+            break
+        gamma = math.atan2(vz, v_h)  # flight-path angle
+        alpha = theta - gamma         # angle of attack (rad)
+        alpha_deg = math.degrees(alpha)
+        CL = cl_of_alpha(alpha_deg)
+
+        # Unit vectors
+        vhx, vhy, vhz = vx / v, vy / v, vz / v
+        if v_h > 1e-6:
+            hxv, hyv = vx / v_h, vy / v_h
+        else:
+            hxv, hyv = hx, hy
+        # Left-perpendicular horizontal (lateral lift axis at zero bank)
+        plx, ply = -hyv, hxv
+        # In-plane lift axis (perpendicular to v, in vertical plane of flight):
+        sg, cg = math.sin(gamma), math.cos(gamma)
+        Lvx, Lvy, Lvz = -hxv * sg, -hyv * sg, cg
+
+        # Lift acceleration magnitude
+        q = 0.5 * RHO * v * v
+        lift_acc = q * DISC_AREA * CL / DISC_MASS
+        # Drag: existing v^2 drag with CD(alpha) shape via induced-drag polar
+        cd_shape = 1.0 + 1.2 * CL * CL
+        drag_acc = drag_k * v * v * cd_shape
+
+        # Apply bank phi: lift rotates about velocity axis. spin_sign sets the
+        # chirality so that for RHBH (spin=+1) +bank pushes lift toward natural
+        # fade direction (left for an RHBH = +plx direction).
+        cphi, sphi = math.cos(phi), math.sin(phi)
+        lat = spin * sphi
+        Lx = lift_acc * (cphi * Lvx + lat * plx)
+        Ly = lift_acc * (cphi * Lvy + lat * ply)
+        Lz = lift_acc * (cphi * Lvz)
+
+        ax = -drag_acc * vhx + Lx
+        ay = -drag_acc * vhy + Ly
+        az = -drag_acc * vhz + Lz - GRAV
+
+        vx += ax * dt; vy += ay * dt; vz += az * dt
+        x  += vx * dt; y  += vy * dt; z  += vz * dt
+
+        # Pitching moment -> pitch evolution (instructions: dtheta/dt = M/Iyy)
+        Cm = CM_ALPHA_PER_DEG * (alpha_deg - ALPHA_TRIM_DEG)
+        M_pitch = q * DISC_AREA * DISC_CHORD * Cm
+        theta += (M_pitch / IYY) * dt
+        # Gyroscopic precession couples pitch moment into bank evolution;
+        # this is what produces the late-flight lateral fade naturally.
+        phi += spin * GYRO_GAIN * (alpha_deg - ALPHA_TRIM_DEG) * dt
+
         t += dt
         travelled = (x - handler_x) * hx + (y - handler_y) * hy
         samples.append((x, y))
 
+        if z <= 0.0:
+            break
+
     return x, y, t, samples
 
 
-def integrate_with_lateral_velocity(
-    handler_x: float,
-    handler_y: float,
-    aim_x: float,
-    aim_y: float,
-    throw: ThrowType,
-    dt: float = 0.02,
-    max_t: float = 6.0,
-) -> Tuple[float, float, float, List[Tuple[float, float]]]:
-    """More careful integrator that tracks a separate lateral velocity so
-    curvature integrates as 0.5 * a * t^2 over the flight rather than per-step
-    only. This is the version used by evaluate_throw."""
-    params = THROW_PARAMS[throw]
-    v = float(params["release_speed"])
-    k = float(params["drag_k"])
-    spin = float(params["spin_sign"])
-    curve = float(params["curve_accel"])
-    late = bool(params["curve_late"])
+# Back-compat wrappers — both names route to the 3D integrator so that
+# existing call sites (find_catch_point, evaluate_throw) work unchanged.
+def integrate_flight(handler_x, handler_y, aim_x, aim_y, throw, dt=0.02, max_t=8.0):
+    return integrate_flight_3d(handler_x, handler_y, aim_x, aim_y, throw, dt, max_t)
 
-    dx = aim_x - handler_x
-    dy = aim_y - handler_y
-    dist0 = math.hypot(dx, dy)
-    if dist0 < 1e-6:
-        return handler_x, handler_y, 0.0, [(handler_x, handler_y)]
-    hx, hy = dx / dist0, dy / dist0
-    px, py = -hy, hx
 
-    x, y = handler_x, handler_y
-    vlat = 0.0
-    t = 0.0
-    samples: List[Tuple[float, float]] = [(x, y)]
-    travelled = 0.0
-    while t < max_t and travelled < dist0:
-        v = max(2.0, v - k * v * v * dt)
-        ramp = min(t / 1.2, 1.5) if late else 1.0
-        lat_a = spin * curve * ramp
-        vlat += lat_a * dt
-        x += hx * v * dt + px * vlat * dt
-        y += hy * v * dt + py * vlat * dt
-        t += dt
-        travelled = (x - handler_x) * hx + (y - handler_y) * hy
-        samples.append((x, y))
-    return x, y, t, samples
+def integrate_with_lateral_velocity(handler_x, handler_y, aim_x, aim_y, throw, dt=0.02, max_t=8.0):
+    return integrate_flight_3d(handler_x, handler_y, aim_x, aim_y, throw, dt, max_t)
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +299,10 @@ class ThrowOption(BaseModel):
     catch_probability: float
     yards_gained: float
     expected_value: float
-    throw_type: Literal["backhand", "flick", "hammer", "scoober"] = "backhand"
+    throw_type: Literal[
+        "backhand", "flick", "hammer", "scoober",
+        "backhand_io", "backhand_oi", "flick_io", "flick_oi",
+    ] = "backhand"
     outcome: Literal[
         "catch", "block", "incomplete", "out_of_bounds", "interception", "callahan"
     ] = "catch"
@@ -396,16 +450,32 @@ _ANCHORS: dict = {"man": {}, "zone": {}, "cup": {}}
 
 
 def best_throw_type(handler: Player, target_x: float, target_y: float) -> ThrowType:
-    """Heuristic AI choice of throw type. Long downfield = backhand/flick;
-    short cross-field break = hammer/scoober."""
+    """Heuristic AI choice of throw type, including IO / OI release rolls.
+
+    Long downfield = backhand/flick (IO for hyzer-flip when target is on the
+    same side as natural fade so the curve straightens; OI when the target is
+    on the break side so the curve doubles down). Short cross-field break =
+    hammer/scoober.
+    """
     dx = target_x - handler.x
     dy = target_y - handler.y
     d = math.hypot(dx, dy)
     if d > 30.0:
-        # long: backhand for open side, flick for break side
-        return ThrowType.flick if dy < 0 else ThrowType.backhand
+        # Long: pick handedness, then IO/OI depending on cross-field component.
+        # RHBH (backhand, spin+1) naturally fades toward +y (left), flick (-1)
+        # fades toward -y (right). IO ~ release-roll opposite spin's fade, OI
+        # ~ release-roll with spin's fade.
+        if dy < 0:  # break-side flick OR backhand-OI territory
+            # strong cross to -y: flick straight, or OI for a curling backhand
+            if abs(dy) > 12.0:
+                return ThrowType.backhand_oi
+            return ThrowType.flick
+        else:
+            if abs(dy) > 12.0:
+                return ThrowType.flick_oi
+            # gentle open-side: a hyzer-flip IO backhand carries flatter
+            return ThrowType.backhand_io if d > 45.0 else ThrowType.backhand
     if abs(dy) > 8.0 and d < 25.0:
-        # short cross-field: overhead
         return ThrowType.hammer if dy > 0 else ThrowType.scoober
     return ThrowType.backhand
 
