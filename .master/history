@@ -1,0 +1,9 @@
+
+# 2026-05-29 09:15:36.182176
++one of the person is marked differently than the rest on his team, he currently holds the frisbee. The user assign initial running direction to all the offensive players, but the AI should take care of analyzing how the defensive player would run. There should be two modes: one that the user picks a player that the current handler throws at, and another in which the AI makes the decision
+
+# 2026-05-29 09:15:51.008605
++standard on full field
+
+# 2026-05-29 09:16:29.951670
++static prediction, but must take into account player running during the time the frisbee is thrown
