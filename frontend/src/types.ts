@@ -33,6 +33,12 @@ export interface ThrowOption {
 
 export type Scheme = "man" | "zone" | "cup";
 
+export interface Wind {
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
 export interface SimulateResponse {
   handler_id: string;
   chosen: ThrowOption | null;

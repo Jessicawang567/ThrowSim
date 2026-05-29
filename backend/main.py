@@ -49,6 +49,16 @@ DISC_SPEED = 22.0      # m/s typical fast throw average (legacy / fallback)
 DEFENDER_REACH = 1.2   # meters: how close a defender must be to D the disc
 RECEIVER_REACH = 1.5
 REACTION_DELAY = 0.15  # seconds defender reaction handicap (world-class but human)
+DEFAULT_REACH_HEIGHT = 2.4  # m: standing reach (~2.1m) + small jump (~0.3m)
+VERTICAL_TOLERANCE = 0.4    # m: how much above reach is still contestable (lay-out)
+
+# Magnus / Robins lateral force coefficient. With Ultimate disc spin rates
+# (~10 rev/s -> omega ~ 60 rad/s) and v ~ 20 m/s, a small but non-trivial
+# lateral acceleration arises from the spinning boundary layer (Potts &
+# Crowther 2002). We model the lateral acceleration as
+#     a_magnus = MAGNUS_K * spin_sign * v   (m/s^2 per (m/s))
+# acting along the +left-perpendicular of the velocity for spin_sign=+1.
+MAGNUS_K = 0.18
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +171,19 @@ def integrate_flight_3d(
     throw: ThrowType,
     dt: float = 0.02,
     max_t: float = 8.0,
-) -> Tuple[float, float, float, List[Tuple[float, float]]]:
+    wind: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> Tuple[float, float, float, float, List[Tuple[float, float, float]]]:
     """3-DOF translational integrator with pitch/bank evolution.
 
-    Returns (end_x, end_y, flight_time, ground_samples). Samples are 2D
-    ground-projected positions (x, y) so downstream OOB / intercept logic is
-    unchanged. Termination: horizontal distance along the initial heading
-    reaches dist0, OR the disc hits the ground (z <= 0), OR max_t expires.
+    Returns (end_x, end_y, end_z, flight_time, samples_3d). Samples include z
+    so downstream contest logic can use disc height vs defender reach.
+    Termination: horizontal distance along the initial heading reaches dist0,
+    OR the disc hits the ground (z <= 0), OR max_t expires.
+
+    `wind` is the ambient wind velocity vector (vx, vy, vz) in m/s; aerodynamic
+    forces (drag, lift, Magnus) are computed using the disc's velocity relative
+    to this wind so that headwinds slow the disc, tailwinds extend flight, and
+    cross-winds push the path laterally.
     """
     params = THROW_PARAMS[throw]
     v0       = float(params["release_speed"])
@@ -175,12 +191,13 @@ def integrate_flight_3d(
     drag_k   = float(params["drag_k"])
     theta    = math.radians(float(params["aoa_deg"]))   # pitch
     phi      = math.radians(float(params["bank_deg"]))  # bank (release roll)
+    wvx, wvy, wvz = wind
 
     dx = aim_x - handler_x
     dy = aim_y - handler_y
     dist0 = math.hypot(dx, dy)
     if dist0 < 1e-6:
-        return handler_x, handler_y, 0.0, [(handler_x, handler_y)]
+        return handler_x, handler_y, RELEASE_HEIGHT, 0.0, [(handler_x, handler_y, RELEASE_HEIGHT)]
     hx, hy = dx / dist0, dy / dist0  # initial horizontal heading
 
     # Initial velocity: aim flat in the horizontal plane with the release pitch
@@ -190,23 +207,25 @@ def integrate_flight_3d(
     vy = v0 * hy
     vz = 0.0
 
-    samples: List[Tuple[float, float]] = [(x, y)]
+    samples: List[Tuple[float, float, float]] = [(x, y, z)]
     t = 0.0
     travelled = 0.0
     while t < max_t and travelled < dist0:
-        v = math.sqrt(vx * vx + vy * vy + vz * vz)
-        v_h = math.sqrt(vx * vx + vy * vy)
+        # Disc velocity RELATIVE TO WIND drives aerodynamic forces.
+        rvx, rvy, rvz = vx - wvx, vy - wvy, vz - wvz
+        v = math.sqrt(rvx * rvx + rvy * rvy + rvz * rvz)
+        v_h = math.sqrt(rvx * rvx + rvy * rvy)
         if v < 1.0:
             break
-        gamma = math.atan2(vz, v_h)  # flight-path angle
+        gamma = math.atan2(rvz, v_h)  # flight-path angle (relative-wind frame)
         alpha = theta - gamma         # angle of attack (rad)
         alpha_deg = math.degrees(alpha)
         CL = cl_of_alpha(alpha_deg)
 
-        # Unit vectors
-        vhx, vhy, vhz = vx / v, vy / v, vz / v
+        # Unit vectors (relative wind)
+        vhx, vhy, vhz = rvx / v, rvy / v, rvz / v
         if v_h > 1e-6:
-            hxv, hyv = vx / v_h, vy / v_h
+            hxv, hyv = rvx / v_h, rvy / v_h
         else:
             hxv, hyv = hx, hy
         # Left-perpendicular horizontal (lateral lift axis at zero bank)
@@ -231,8 +250,15 @@ def integrate_flight_3d(
         Ly = lift_acc * (cphi * Lvy + lat * ply)
         Lz = lift_acc * (cphi * Lvz)
 
-        ax = -drag_acc * vhx + Lx
-        ay = -drag_acc * vhy + Ly
+        # Magnus / Robins lateral force from spin — INDEPENDENT of bank.
+        # A flat (bank=0) throw still curves with spin: acts along the
+        # left-perpendicular for spin_sign=+1 (RHBH fades left).
+        magnus_acc = MAGNUS_K * spin * v
+        Mx = magnus_acc * plx
+        My = magnus_acc * ply
+
+        ax = -drag_acc * vhx + Lx + Mx
+        ay = -drag_acc * vhy + Ly + My
         az = -drag_acc * vhz + Lz - GRAV
 
         vx += ax * dt; vy += ay * dt; vz += az * dt
@@ -248,22 +274,22 @@ def integrate_flight_3d(
 
         t += dt
         travelled = (x - handler_x) * hx + (y - handler_y) * hy
-        samples.append((x, y))
+        samples.append((x, y, z))
 
         if z <= 0.0:
             break
 
-    return x, y, t, samples
+    return x, y, z, t, samples
 
 
 # Back-compat wrappers — both names route to the 3D integrator so that
 # existing call sites (find_catch_point, evaluate_throw) work unchanged.
-def integrate_flight(handler_x, handler_y, aim_x, aim_y, throw, dt=0.02, max_t=8.0):
-    return integrate_flight_3d(handler_x, handler_y, aim_x, aim_y, throw, dt, max_t)
+def integrate_flight(handler_x, handler_y, aim_x, aim_y, throw, dt=0.02, max_t=8.0, wind=(0.0, 0.0, 0.0)):
+    return integrate_flight_3d(handler_x, handler_y, aim_x, aim_y, throw, dt, max_t, wind)
 
 
-def integrate_with_lateral_velocity(handler_x, handler_y, aim_x, aim_y, throw, dt=0.02, max_t=8.0):
-    return integrate_flight_3d(handler_x, handler_y, aim_x, aim_y, throw, dt, max_t)
+def integrate_with_lateral_velocity(handler_x, handler_y, aim_x, aim_y, throw, dt=0.02, max_t=8.0, wind=(0.0, 0.0, 0.0)):
+    return integrate_flight_3d(handler_x, handler_y, aim_x, aim_y, throw, dt, max_t, wind)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +303,15 @@ class Player(BaseModel):
     # Direction in radians (math convention); None for defense (AI controls them)
     direction: Optional[float] = None
     is_handler: bool = False
+    # Vertical reach height in meters: standing reach + max jump (3D contest).
+    # World-class ultimate players ~2.4 m; user-adjustable per player.
+    reach_height: float = Field(default=DEFAULT_REACH_HEIGHT, ge=1.5, le=3.5)
+
+
+class WindVec(BaseModel):
+    vx: float = 0.0
+    vy: float = 0.0
+    vz: float = 0.0
 
 
 class SimulateRequest(BaseModel):
@@ -286,6 +321,9 @@ class SimulateRequest(BaseModel):
     disc_speed: float = Field(default=DISC_SPEED, ge=5.0, le=40.0)
     player_speed: float = Field(default=PLAYER_SPEED, ge=2.0, le=12.0)
     scheme: Literal["man", "zone", "cup"] = "man"
+    # Ambient wind vector in m/s. vx along field length (positive = tailwind
+    # toward attacking endzone), vy across field width, vz vertical.
+    wind: WindVec = Field(default_factory=WindVec)
 
 
 class ThrowOption(BaseModel):
@@ -485,13 +523,14 @@ def find_catch_point(
     receiver: Player,
     player_speed: float,
     throw: ThrowType,
-) -> Tuple[float, float, float, List[Tuple[float, float]]]:
+    wind: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> Tuple[float, float, float, float, List[Tuple[float, float, float]]]:
     """Iteratively solve the lead-pass equation with the time-stepped
     integrator. We pick an aim point, integrate the flight, then the catch
     point is the integrator's endpoint (which includes lateral curvature).
     The aim is shifted to cancel the predicted curvature so that the disc
     actually arrives at the lead point.
-    Returns (catch_x, catch_y, flight_time, path_samples)."""
+    Returns (catch_x, catch_y, catch_z, flight_time, samples_3d)."""
     if receiver.direction is None:
         vx, vy = 0.0, 0.0
     else:
@@ -501,8 +540,8 @@ def find_catch_point(
     rx, ry = receiver.x, receiver.y
     # initial guess: aim at receiver, no lead
     aim_x, aim_y = rx, ry
-    end_x, end_y, t, samples = integrate_with_lateral_velocity(
-        handler.x, handler.y, aim_x, aim_y, throw
+    end_x, end_y, end_z, t, samples = integrate_with_lateral_velocity(
+        handler.x, handler.y, aim_x, aim_y, throw, wind=wind
     )
     for _ in range(8):
         lead_x = rx + vx * t
@@ -511,12 +550,12 @@ def find_catch_point(
         # correct aim by the curvature offset (lead - end)
         aim_x += lead_x - end_x
         aim_y += lead_y - end_y
-        end_x, end_y, t, samples = integrate_with_lateral_velocity(
-            handler.x, handler.y, aim_x, aim_y, throw
+        end_x, end_y, end_z, t, samples = integrate_with_lateral_velocity(
+            handler.x, handler.y, aim_x, aim_y, throw, wind=wind
         )
         if abs(end_x - lead_x) < 0.1 and abs(end_y - lead_y) < 0.1:
             break
-    return end_x, end_y, t, samples
+    return end_x, end_y, end_z, t, samples
 
 
 def catch_probability(
@@ -534,10 +573,11 @@ def catch_probability(
     return 1.0 / (1.0 + math.exp(-margin / 0.35))
 
 
-def _path_crosses_oob(samples: List[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+def _path_crosses_oob(samples: List[Tuple[float, float, float]]) -> Optional[Tuple[float, float]]:
     """Return the (x, y) point at which the flight path first exits the
     sideline/endline rectangle, or None if it stays in bounds."""
-    for (x, y) in samples:
+    for s in samples:
+        x, y = s[0], s[1]
         if x < 0.0 or x > FIELD_LENGTH or y < 0.0 or y > FIELD_WIDTH:
             return (max(0.0, min(FIELD_LENGTH, x)), max(0.0, min(FIELD_WIDTH, y)))
     return None
@@ -545,19 +585,24 @@ def _path_crosses_oob(samples: List[Tuple[float, float]]) -> Optional[Tuple[floa
 
 def _defender_intercept(
     defender: Player,
-    samples: List[Tuple[float, float]],
+    samples: List[Tuple[float, float, float]],
     dt: float,
     player_speed: float,
-) -> Optional[Tuple[int, float, Tuple[float, float]]]:
+) -> Optional[Tuple[int, float, Tuple[float, float, float]]]:
     """Walk the disc path and check whether the defender can physically reach
-    any point on the path BEFORE the disc passes that point. Returns
-    (sample_index, time_of_intercept, point) or None."""
-    for i, (px, py) in enumerate(samples):
+    any point on the path BEFORE the disc passes that point, AND the disc is
+    within the defender's vertical reach. Returns (sample_index, time, point).
+    """
+    reach = getattr(defender, "reach_height", DEFAULT_REACH_HEIGHT)
+    for i, (px, py, pz) in enumerate(samples):
         t_disc = i * dt
         d_dist = dist(defender.x, defender.y, px, py)
         t_def = d_dist / player_speed + REACTION_DELAY
+        # vertical contestability: disc must be within reach + small tolerance
+        if pz > reach + VERTICAL_TOLERANCE:
+            continue
         if t_def <= t_disc and t_disc > 0.05:
-            return (i, t_disc, (px, py))
+            return (i, t_disc, (px, py, pz))
     return None
 
 
@@ -568,9 +613,10 @@ def evaluate_throw(
     all_defenders: List[Player],
     player_speed: float,
     throw: ThrowType,
+    wind: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> ThrowOption:
-    cx, cy, flight_time, samples = find_catch_point(
-        handler, receiver, player_speed, throw
+    cx, cy, cz, flight_time, samples = find_catch_point(
+        handler, receiver, player_speed, throw, wind=wind
     )
     dt_sample = 0.02
 
@@ -578,13 +624,28 @@ def evaluate_throw(
     receiver_reach_time = receiver_run_dist / player_speed
     receiver_arrival = max(flight_time, receiver_reach_time)
 
+    # 3D contest: if disc is above receiver's reach (even laying out), they
+    # can't make the play in time.
+    rec_reach = getattr(receiver, "reach_height", DEFAULT_REACH_HEIGHT)
+    receiver_can_reach_height = cz <= rec_reach + VERTICAL_TOLERANCE
+
     if defender is not None:
         d_dist = dist(defender.x, defender.y, cx, cy)
         defender_arrival = d_dist / player_speed + REACTION_DELAY
+        def_reach = getattr(defender, "reach_height", DEFAULT_REACH_HEIGHT)
+        defender_can_reach_height = cz <= def_reach + VERTICAL_TOLERANCE
     else:
         defender_arrival = float("inf")
+        defender_can_reach_height = False
 
     p = catch_probability(receiver_arrival, defender_arrival, receiver_reach_time)
+    if not receiver_can_reach_height:
+        # disc sails over receiver's max jump reach
+        p = min(p, 0.05)
+    if not defender_can_reach_height:
+        # defender can't contest at this height: treat margin as effectively
+        # huge in receiver's favor (no time pressure from this defender)
+        p = max(p, 0.85) if receiver_can_reach_height else p
 
     # --- Outcome classification --------------------------------------------
     outcome: str = "catch"
@@ -598,7 +659,8 @@ def evaluate_throw(
 
     # 2) Interception: any defender (not just the matched one) can reach a
     #    point on the path before the disc does, AND that point is within
-    #    DEFENDER_REACH of the path point.
+    #    DEFENDER_REACH of the path point AND the defender can reach the
+    #    disc height (3D contest).
     if outcome == "catch":
         best_intercept = None
         for d in all_defenders:
@@ -607,11 +669,12 @@ def evaluate_throw(
                 if best_intercept is None or ic[1] < best_intercept[1]:
                     best_intercept = ic + (d,)
         if best_intercept is not None:
-            _, t_ic, (ix, iy), d_who = best_intercept
+            _, t_ic, (ix, iy, iz), d_who = best_intercept
             # Also require the intercept is meaningful: defender beats receiver
             r_to_ic = dist(receiver.x, receiver.y, ix, iy) / player_speed
             if t_ic < r_to_ic:
                 cx, cy = ix, iy
+                cz = iz
                 flight_time = t_ic
                 outcome = "interception"
                 # Callahan: interception in attacking end zone (offense's
@@ -656,7 +719,7 @@ def evaluate_throw(
         expected_value=ev,
         throw_type=throw.value,
         outcome=outcome,  # type: ignore[arg-type]
-        flight_path=[[x, y] for (x, y) in samples[::3]],  # decimate
+        flight_path=[[s[0], s[1]] for s in samples[::3]],  # decimate, ground projection
     )
 
 
@@ -709,6 +772,7 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
     all_defenders = list(def_lookup.values())
     off_lookup = {p.id: p for p in players if p.team == "offense"}
 
+    wind_t = (req.wind.vx, req.wind.vy, req.wind.vz)
     options: List[ThrowOption] = []
     for o in players:
         if o.team != "offense" or o.id == handler.id:
@@ -716,7 +780,7 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
         defender = def_lookup.get(matchups.get(o.id, ""), None)
         throw = best_throw_type(handler, o.x, o.y)
         opt = evaluate_throw(
-            handler, o, defender, all_defenders, req.player_speed, throw
+            handler, o, defender, all_defenders, req.player_speed, throw, wind=wind_t
         )
         options.append(opt)
 

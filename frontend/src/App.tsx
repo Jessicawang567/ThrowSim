@@ -3,7 +3,7 @@ import { FieldCanvas } from "./components/FieldCanvas";
 import { PlayerInspector } from "./components/PlayerInspector";
 import { ResultPanel } from "./components/ResultPanel";
 import { defaultPlayers } from "./presets";
-import type { Player, Scheme, SimulateResponse } from "./types";
+import type { Player, Scheme, SimulateResponse, Wind } from "./types";
 import { simulate } from "./api";
 import { Play, RotateCcw, Bot, MousePointerClick } from "lucide-react";
 
@@ -17,6 +17,7 @@ export default function App() {
   const [result, setResult] = useState<SimulateResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [wind, setWind] = useState<Wind>({ vx: 0, vy: 0, vz: 0 });
 
   const selected = players.find((p) => p.id === selectedId) ?? null;
 
@@ -48,7 +49,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const r = await simulate(players, mode, targetId, scheme);
+      const r = await simulate(players, mode, targetId, scheme, wind);
       setResult(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -133,6 +134,36 @@ export default function App() {
             )}
           </div>
         )}
+        <div className="bg-slate-900/70 border-t border-slate-800 px-4 py-2 max-w-[1400px] mx-auto flex flex-wrap items-center gap-4 text-xs text-slate-300">
+          <span className="uppercase tracking-wider text-slate-400">Wind (m/s)</span>
+          <WindSlider
+            label="along field (+tail)"
+            value={wind.vx}
+            min={-10}
+            max={10}
+            onChange={(v) => setWind({ ...wind, vx: v })}
+          />
+          <WindSlider
+            label="cross"
+            value={wind.vy}
+            min={-10}
+            max={10}
+            onChange={(v) => setWind({ ...wind, vy: v })}
+          />
+          <WindSlider
+            label="vertical"
+            value={wind.vz}
+            min={-5}
+            max={5}
+            onChange={(v) => setWind({ ...wind, vz: v })}
+          />
+          <button
+            onClick={() => setWind({ vx: 0, vy: 0, vz: 0 })}
+            className="ml-auto rounded px-2 py-1 ring-1 ring-slate-700 hover:bg-slate-800 text-slate-300"
+          >
+            Calm
+          </button>
+        </div>
       </header>
 
       <main className="max-w-[1400px] mx-auto p-4 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
@@ -195,5 +226,37 @@ function Legend({ swatch, label }: { swatch: string; label: string }) {
       />
       {label}
     </div>
+  );
+}
+
+function WindSlider({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2">
+      <span className="text-slate-400 w-28">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={0.5}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="accent-cyan-400 w-32"
+      />
+      <span className="tabular-nums w-10 text-right text-slate-200">
+        {value.toFixed(1)}
+      </span>
+    </label>
   );
 }

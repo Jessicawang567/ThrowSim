@@ -68,3 +68,19 @@ _Started: 2026-05-29 09:16_
 **Eval summary:** A working, well-built React+FastAPI prototype: clean install, clean build, both servers respond, end-to-end simulate call returns realistic 3-DOF disc trajectories with α-dependent lift, pitching-moment-driven AoA evolution, and bank-precession late fade. UI is Tailwind-based with sensible component decomposition and full loading/empty/error states. However, large swaths of the stated design requi
 
 ---
+
+## Cycle 4 (research-swe-eval) — 2026-05-29 10:01
+**Verdict:** weak-disapprove
+**New checklist items (11):**
+- [yes/no] A flat (zero-bank) release with non-zero spin produces measurable lateral curvature via a spin-magnitude term in lateral acceleration, not solely from a bank/roll projection of lift.
+- [yes/no] Pitching moment drives heading/roll change proportional to 1/spin (gyroscopic precession), so higher spin yields straighter flight rather than directly tilting pitch.
+- [yes/no] Lift and drag use angle-of-attack polynomials (e.g., CL = CL0 + CLα·α, CD = CD0 + CDα·α²) with α recomputed each step from velocity vs. disc plane, not constants.
+- [yes/no] Dynamic pressure and all aero forces/moments use (v_disc − v_wind) with a configurable 3-component wind vector, not ground-frame velocity.
+- [yes/no] Aerodynamic center is placed forward of CG so an unspun disc is roll-unstable and stability emerges only via gyroscopic spin.
+- [yes/no] Increasing spin yields a small lift enhancement (more pronounced at low α) and increases drag via trailing-vortex strength at higher α (~>5°).
+- [yes/no] Catch/contest compares disc altitude at arrival to each player's max reach (standing reach + jump + extension), not just 2D ground distance.
+- [yes/no] Contest checks whether each player can reach the disc's (x,y,z) within its flight time given sprint speed, acceleration, and jump takeoff timing window.
+
+**Eval summary:** Vite+React+TS+Tailwind frontend with a clean dark dashboard, working end-to-end POST /api/simulate flow, and a notably ambitious aerodynamics model (α-dependent CL, induced-drag polar, relative-wind frame, Magnus, gyro precession, multiple release types incl. IO/OI). However, several physics fundamentals are missing or incorrect (1/spin precession sign wrong, no spin→lift coupling, no destabilizin
+
+---
