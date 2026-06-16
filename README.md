@@ -9,6 +9,8 @@ It's a coaching / tactics sandbox: experiment with formations, throwing forces,
 defensive schemes, and wind, and see how the geometry changes who gets open.
 
 ---
+<img width="1456" height="653" alt="image" src="https://github.com/user-attachments/assets/1d9b0d4b-61bf-4172-9fa1-2279b38f9307" />
+---
 
 ## What it does
 
